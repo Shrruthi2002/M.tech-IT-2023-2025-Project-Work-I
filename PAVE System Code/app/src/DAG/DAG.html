@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Medical Records DAG Visualizer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/6.7.0/d3.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        h1 {
+            color: #2c3e50;
+        }
+        #loadingIndicator {
+            display: none;
+            color: #3498db;
+            margin: 10px 0;
+        }
+        #errorMessage {
+            color: #e74c3c;
+            margin: 10px 0;
+        }
+        .dag-container ul {
+            list-style: none;
+            padding: 0;
+        }
+        .dag-container li {
+            margin: 5px 0;
+            padding: 5px;
+            background: #ecf0f1;
+            border: 1px solid #bdc3c7;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Medical Records DAG Visualizer</h1>
+    <div>
+        <label for="recordHash">Enter Record Hash:</label>
+        <input type="text" id="recordHash" placeholder="Enter IPFS Hash">
+        <button onclick="fetchAndDisplayRecords()">Fetch Records</button>
+    </div>
+    
+    <div id="loadingIndicator">Loading medical records...</div>
+    <div id="errorMessage"></div>
+    <div id="recordsContainer" class="dag-container"></div>
+
+    <script>
+        /**
+         * Parses raw data fetched from IPFS.
+         * @param {string} rawData - Raw data as a string.
+         * @returns {Array|Object} - Parsed JSON object or array.
+         */
+        function parseRecordsData(rawData) {
+            try {
+                return JSON.parse(rawData);
+            } catch (error) {
+                console.error('Error parsing records data:', error);
+                throw new Error('Invalid data format. Ensure the IPFS file contains valid JSON.');
+            }
+        }
+
+        /**
+         * Generates a visualization of medical records in a DAG format.
+         * @param {Array|Object} records - Parsed records data.
+         * @returns {HTMLElement} - DOM element representing the records.
+         */
+        function generateMedicalRecordsDAG(records) {
+            const dagContainer = document.createElement('div');
+            dagContainer.className = 'medical-records-dag';
+
+            if (Array.isArray(records) && records.length > 0) {
+                const recordsList = document.createElement('ul');
+                records.forEach(record => {
+                    const listItem = document.createElement('li');
+                    listItem.textContent = JSON.stringify(record, null, 2); // Pretty print JSON
+                    recordsList.appendChild(listItem);
+                });
+                dagContainer.appendChild(recordsList);
+            } else if (typeof records === 'object' && records !== null) {
+                dagContainer.textContent = JSON.stringify(records, null, 2);
+            } else {
+                dagContainer.textContent = 'No records found';
+            }
+
+            return dagContainer;
+        }
+
+        /**
+         * Fetches and displays medical records from IPFS.
+         */
+        async function fetchAndDisplayRecords() {
+            const recordHash = document.getElementById('recordHash').value.trim();
+            const recordsContainer = document.getElementById('recordsContainer');
+            const loadingIndicator = document.getElementById('loadingIndicator');
+            const errorMessage = document.getElementById('errorMessage');
+
+            // Reset UI state
+            recordsContainer.innerHTML = '';
+            errorMessage.textContent = '';
+            loadingIndicator.style.display = 'block';
+
+            if (!recordHash) {
+                errorMessage.textContent = 'Please enter a valid IPFS hash.';
+                loadingIndicator.style.display = 'none';
+                return;
+            }
+
+            try {
+                const response = await fetch(`http://localhost:8080/ipfs/${recordHash}`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+
+                const rawData = await response.text();
+                const records = parseRecordsData(rawData);
+                loadingIndicator.style.display = 'none';
+
+                const dagVisualization = generateMedicalRecordsDAG(records);
+                recordsContainer.appendChild(dagVisualization);
+
+            } catch (error) {
+                loadingIndicator.style.display = 'none';
+                console.error('Fetch error:', error);
+                errorMessage.textContent = `Error: ${error.message}. 
+                    Check the IPFS hash, ensure IPFS Desktop is running, 
+                    and verify the file format.`;
+            }
+        }
+    </script>
+</body>
+</html>

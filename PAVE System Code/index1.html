@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Blockchain DAG Visualization</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/web3/1.8.2/web3.min.js"></script>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      max-width: 1200px;
+      margin: 0 auto;
+      height: 100vh;
+      box-sizing: border-box;
+    }
+    h1 {
+      margin: 0;
+      padding: 5px 0;
+      font-size: 24px;
+    }
+    #status {
+      margin: 5px;
+      font-size: 14px;
+      color: #333;
+    }
+    #stats {
+      display: flex;
+      gap: 15px;
+      margin: 5px 0;
+      padding: 8px;
+      border-radius: 6px;
+      background-color: #e9ecef;
+      flex-wrap: wrap;
+      justify-content: center;
+      width: 100%;
+      max-width: 800px;
+      font-weight: bold;
+    }
+    #legend {
+      display: flex;
+      gap: 15px;
+      margin: 5px 0;
+      padding: 8px;
+      border-radius: 6px;
+      background-color: #f5f5f5;
+      flex-wrap: wrap;
+      justify-content: center;
+      width: 100%;
+      max-width: 800px;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 14px;
+    }
+    .legend-color {
+      width: 15px;
+      height: 15px;
+      border-radius: 3px;
+    }
+    #graph {
+      width: 100%;
+      height: calc(100vh - 180px);
+      border: 1px solid #ccc;
+      overflow: hidden;
+      margin-top: 10px;
+      border-radius: 8px;
+    }
+    .node rect {
+      stroke: #333;
+      stroke-width: 1.5px;
+    }
+    .link {
+      stroke: #666;
+      stroke-opacity: 0.6;
+    }
+    .highlight-blue { fill: #4A90E2; }
+    .highlight-red { fill: #E57373; }
+    .highlight-yellow { fill: #FFB74D; }
+    .highlight-green { fill: #81C784; }
+    .contract { fill: #81C784; }
+    .node text {
+      fill: #333;
+      text-anchor: middle;
+      font-weight: 700;
+      text-shadow: 0 0 3px rgba(255, 255, 255, 0.8);
+    }
+    .block-number {
+      font-size: 14px;
+      font-weight: 800;
+    }
+    .block-role {
+      font-size: 12px;
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+  <h1>Blockchain DAG Visualization</h1>
+  
+  <div id="stats"></div>
+  
+  <div id="legend">
+    <div class="legend-item">
+      <div class="legend-color" style="background-color: #4A90E2"></div>
+      <span>Patient 1</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-color" style="background-color: #E57373"></div>
+      <span>Patient 2</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-color" style="background-color: #FFB74D"></div>
+      <span>Doctor 1</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-color" style="background-color: #81C784"></div>
+      <span>Doctor 2</span>
+    </div>
+  </div>
+
+  <div id="status">Loading blockchain data...</div>
+  <div id="graph"></div>
+
+  <script>
+    const highlightedAddresses = {
+      "0x573f4e7d3d9eee34f07ac11eae51eb657029300f": { type: "highlight-blue", role: "Patient 1" },
+      "0x61550801a70d2b43a9f442e308b3eecc595a7e45": { type: "highlight-red", role: "Patient 2" },
+      "0x73c18f605d2b9a5555c7335686430a356af6a50e": { type: "highlight-yellow", role: "Doctor 1" },
+      "0xdb88a5e9032bc7a2e99a835755b98fb4d38b5232": { type: "highlight-green", role: "Doctor 2" }
+    };
+
+    async function loadBlocks() {
+      try {
+        const web3 = new Web3("http://localhost:9545");
+        const latestBlockNumber = Math.min(40, Number(await web3.eth.getBlockNumber()));
+        const blocks = [];
+
+        for (let i = 0; i <= latestBlockNumber; i++) {
+          const block = await web3.eth.getBlock(i, true);
+
+          const transactionDetails = block.transactions.map(tx => ({
+            from: tx.from?.toLowerCase() || "N/A",
+            to: tx.to?.toLowerCase() || "N/A"
+          }));
+
+          blocks.push({
+            number: Number(block.number),
+            hash: block.hash,
+            parentHash: block.parentHash,
+            transactions: block.transactions.length,
+            accounts: transactionDetails,
+            ...determineBlockType(transactionDetails)
+          });
+        }
+
+        updateBlockStats(blocks);
+        drawDAG(blocks);
+        document.getElementById("status").textContent = `Showing ${blocks.length} blocks`;
+      } catch (error) {
+        console.error("Error loading blocks:", error);
+        document.getElementById("status").textContent = "Error loading blocks. Check console for details.";
+      }
+    }
+
+    function updateBlockStats(blocks) {
+      const stats = {
+        "Patient 1": 0,
+        "Patient 2": 0,
+        "Doctor 1": 0,
+        "Doctor 2": 0
+      };
+
+      blocks.forEach(block => {
+        stats[block.role]++;
+      });
+
+      const statsDiv = document.getElementById("stats");
+      statsDiv.innerHTML = Object.entries(stats)
+        .map(([role, count]) => `<span>${role}: ${count}</span>`)
+        .join(" | ");
+    }
+
+    function determineBlockType(transactions) {
+      for (const [address, { type, role }] of Object.entries(highlightedAddresses)) {
+        const involvesAddress = transactions.some(tx => tx.from === address || tx.to === address);
+        if (involvesAddress) return { type, role };
+      }
+      return { type: "contract", role: "Doctor 2" };
+    }
+
+    function drawDAG(blocks) {
+      d3.select("#graph").html("");
+
+      const margin = { top: 20, right: 20, bottom: 20, left: 20 };
+      const width = document.getElementById("graph").clientWidth - margin.left - margin.right;
+      const height = document.getElementById("graph").clientHeight - margin.top - margin.bottom;
+
+      const svg = d3.select("#graph")
+        .append("svg")
+        .attr("width", width + margin.left + margin.right)
+        .attr("height", height + margin.top + margin.bottom)
+        .append("g")
+        .attr("transform", `translate(${margin.left},${margin.top})`);
+
+      const nodes = blocks.map(block => ({
+        id: block.hash,
+        label: `Block #${block.number}`,
+        transactions: block.transactions,
+        accounts: block.accounts,
+        number: block.number,
+        type: block.type,
+        role: block.role
+      }));
+
+      const nodeIds = new Set(nodes.map(node => node.id));
+
+      const links = blocks
+        .filter(block => nodeIds.has(block.parentHash))
+        .map(block => ({
+          source: block.hash,
+          target: block.parentHash
+        }));
+
+      const simulation = d3.forceSimulation(nodes)
+        .force("link", d3.forceLink(links).id(d => d.id).distance(80))
+        .force("charge", d3.forceManyBody().strength(-400))
+        .force("center", d3.forceCenter(width / 2, height / 2))
+        .force("x", d3.forceX(width / 2).strength(0.1))
+        .force("y", d3.forceY(height / 2).strength(0.1))
+        .force("collision", d3.forceCollide().radius(50));
+
+      const link = svg
+        .selectAll(".link")
+        .data(links)
+        .enter()
+        .append("line")
+        .attr("class", "link");
+
+      const node = svg
+        .selectAll(".node")
+        .data(nodes)
+        .enter()
+        .append("g")
+        .attr("class", "node")
+        .call(
+          d3.drag()
+            .on("start", dragStarted)
+            .on("drag", dragged)
+            .on("end", dragEnded)
+        );
+
+      const blockWidth = 80;
+      const blockHeight = 60;
+
+      node.append("rect")
+        .attr("width", blockWidth)
+        .attr("height", blockHeight)
+        .attr("x", -blockWidth / 2)
+        .attr("y", -blockHeight / 2)
+        .attr("class", d => d.type)
+        .attr("rx", 5)
+        .attr("ry", 5);
+
+      node.append("text")
+        .text(d => `#${d.number}`)
+        .attr("class", "block-number")
+        .attr("y", -15);
+
+      node.append("text")
+        .text(d => d.role)
+        .attr("class", "block-role")
+        .attr("y", 5);
+
+      node.append("title")
+        .text(d =>
+          `Role: ${d.role}\nTransactions:\n${d.accounts
+            .map(acc => `From: ${acc.from}, To: ${acc.to}`)
+            .join("\n")}`
+        );
+
+      simulation.on("tick", () => {
+        nodes.forEach(d => {
+          d.x = Math.max(blockWidth/2, Math.min(width - blockWidth/2, d.x));
+          d.y = Math.max(blockHeight/2, Math.min(height - blockHeight/2, d.y));
+        });
+
+        link
+          .attr("x1", d => d.source.x)
+          .attr("y1", d => d.source.y)
+          .attr("x2", d => d.target.x)
+          .attr("y2", d => d.target.y);
+
+        node.attr("transform", d => `translate(${d.x},${d.y})`);
+      });
+
+      function dragStarted(event, d) {
+        if (!event.active) simulation.alphaTarget(0.3).restart();
+        d.fx = d.x;
+        d.fy = d.y;
+      }
+
+      function dragged(event, d) {
+        d.fx = event.x;
+        d.fy = event.y;
+      }
+
+      function dragEnded(event, d) {
+        if (!event.active) simulation.alphaTarget(0);
+        d.fx = null;
+        d.fy = null;
+      }
+    }
+
+    window.onload = loadBlocks;
+  </script>
+</body>
+</html>
